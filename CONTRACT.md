@@ -203,9 +203,74 @@ pause, seek, chapter change, speed change, app backgrounding, and playback end.
 Position loss after a force-quit is the single most visible bug in an audiobook
 player. When in doubt, write.
 
+## 7. Library sync
+
+Section 4 deliberately excludes files: "progress is tiny and frequent, files
+are large and rare." This section is that different problem. A book added on
+one device does not appear on another through section 4's sync document,
+that document only ever carries progress for books a device already has.
+
+Library sync lives in its own Drive folder, **not** `appDataFolder`: files
+here are large and the user should be able to see and manage them like any
+other Drive content, which a hidden app-data folder doesn't allow. This needs
+the `drive.file` scope in addition to `drive.appdata`; a client already
+authorized under v1 (progress-only) must re-consent to get it.
+
+- Folder name: `Audiobook Core`, created at the root of the user's Drive if
+  it doesn't already exist (find-by-name first; do not create duplicates).
+- `library-v1.json` in that folder:
+
+```json
+{
+  "schema": 1,
+  "books": [
+    {
+      "content_id": "a3f...",
+      "title": "Chapter One: The Beginning",
+      "author": "...",
+      "narrator": "...",
+      "duration_ms": 36961826,
+      "chapters": [ /* section 2 shape */ ],
+      "chapter_source": "quicktime",
+      "cover_format": "jpeg",
+      "file_name": "a3f....m4b",
+      "added_at": 1758231041123
+    }
+  ]
+}
+```
+
+  Same schema-refusal rule as section 4: a client seeing a `schema` it
+  doesn't understand refuses to write rather than overwrite a newer format.
+- The audio file itself is a separate Drive file in the same folder, named
+  `<content_id>.<original extension>`. `file_name` in the metadata above is
+  that name, kept explicit rather than reconstructed, since a future format
+  might not derive it so mechanically.
+- **Cover image bytes are not synced in v1.** `cover_format` travels so a
+  puller knows one exists; the bytes stay device-local, same gap as section 2
+  already has for the on-demand `extract_cover`/`extractCover` accessor.
+- Merge is a union keyed on `content_id`: no divergence concept like section
+  3's progress merge, since library entries are add-once metadata, not
+  something playback keeps rewriting. On a same-`content_id` collision
+  (should only happen from clock skew across devices adding the same file
+  near-simultaneously) keep the entry with the higher `added_at`.
+- Pulling a `content_id` the local device doesn't have: add the metadata
+  locally, then download the audio file into that platform's own managed
+  cache location (never a user-facing path picker, there was no user pick).
+  Playback reads it like any other local file once downloaded.
+- Pushing: after a local add (from a user-picked file) succeeds and the
+  device is signed in, upload the audio file, then merge this device's
+  library into the shared `library-v1.json` and write it back.
+- v1 uploads and downloads the whole file, not resumably. A dropped
+  connection mid-transfer means starting over. Fine for now; revisit if it
+  turns out to matter in practice.
+
 ---
 
 ## Changelog
 
 - **v1** (initial): content ID, chapter shape, progress record, Drive sync
   document, local schema.
+- Added section 7 (library sync: book metadata and audio files, a separate
+  Drive folder and scope from the progress-only sync document). Additive,
+  no `schema` bump: section 4's sync document is unchanged.
