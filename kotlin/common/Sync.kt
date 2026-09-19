@@ -106,6 +106,7 @@ data class SyncMergeResult(
  * merging (and thus rather than ever writing back) if [remote] is a schema
  * newer than this client understands, per CONTRACT.md section 4.
  */
+@Throws(UnsupportedSchemaError::class)
 fun mergeSyncDocuments(
     local: SyncDocument,
     remote: SyncDocument,
@@ -200,6 +201,7 @@ fun encodeSyncDocument(doc: SyncDocument): String {
  * plain [IllegalArgumentException], since a malformed sync document is a
  * data problem, not a file-format problem.
  */
+@Throws(IllegalArgumentException::class)
 fun decodeSyncDocument(json: String): SyncDocument {
     val p = JsonCursor(json)
     p.expect('{')
