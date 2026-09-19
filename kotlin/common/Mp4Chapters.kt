@@ -273,7 +273,7 @@ private fun decodeUtf16(b: ByteArray, bigEndian: Boolean): String {
         chars[j++] = (if (bigEndian) (hi shl 8) or lo else (lo shl 8) or hi).toChar()
         i += 2
     }
-    return String(chars, 0, j)
+    return chars.concatToString(0, j)
 }
 
 private fun decodeCp1252(b: ByteArray): String {
@@ -282,7 +282,7 @@ private fun decodeCp1252(b: ByteArray): String {
         val c = b.u8(i)
         chars[i] = if (c in 0x80..0x9F) CP1252_HIGH[c - 0x80].toChar() else c.toChar()
     }
-    return String(chars)
+    return chars.concatToString()
 }
 
 private fun String.stripNul(): String = trim('\u0000')

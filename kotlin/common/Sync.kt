@@ -155,6 +155,15 @@ interface SyncBackend {
 
 // ------------------------------------------------------------------- JSON
 
+private val HEX_DIGITS = "0123456789abcdef"
+
+/** String.format's %-formatting is JVM-only; this needs to compile on Kotlin/Native too. */
+private fun hex4(code: Int): String {
+    val sb = StringBuilder(4)
+    for (shift in intArrayOf(12, 8, 4, 0)) sb.append(HEX_DIGITS[(code shr shift) and 0xF])
+    return sb.toString()
+}
+
 private fun jsonEscape(s: String): String {
     val sb = StringBuilder()
     for (c in s) when {
@@ -163,7 +172,7 @@ private fun jsonEscape(s: String): String {
         c == '\n' -> sb.append("\\n")
         c == '\r' -> sb.append("\\r")
         c == '\t' -> sb.append("\\t")
-        c.code < 0x20 -> sb.append("\\u%04x".format(c.code))
+        c.code < 0x20 -> sb.append("\\u").append(hex4(c.code))
         else -> sb.append(c)
     }
     return sb.toString()
