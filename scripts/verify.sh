@@ -25,13 +25,25 @@ if [ -z "$KOTLINC" ]; then
 fi
 
 JAR="$BUILD/ab.jar"
-if [ ! -f "$JAR" ] || [ -n "$(find kotlin/src -name '*.kt' -newer "$JAR" 2>/dev/null)" ]; then
+if [ ! -f "$JAR" ] || [ -n "$(find kotlin/common kotlin/jvm kotlin/jvmtest -name '*.kt' -newer "$JAR" 2>/dev/null)" ]; then
   echo "==> Compiling Kotlin port"
-  "$KOTLINC" kotlin/src/*.kt -include-runtime -d "$JAR" 2>&1 | grep -v '^warning:' || true
+  set +e
+  "$KOTLINC" kotlin/common/*.kt kotlin/jvm/*.kt kotlin/jvmtest/*.kt -include-runtime -d "$JAR" > "$BUILD/kotlinc.log" 2>&1
+  KOTLINC_STATUS=$?
+  set -e
+  grep -v '^warning:' "$BUILD/kotlinc.log" || true
+  # A failed compile must not fall through to running a stale jar as if it were current.
+  if [ "$KOTLINC_STATUS" -ne 0 ]; then
+    echo "==> Kotlin compilation failed"
+    exit 1
+  fi
 fi
 
+echo "==> Sync merge tests"
+java -cp "$JAR" audiobook.core.jvm.JvmSyncTestKt
+
 echo "==> Running Kotlin port"
-FILES=$(find "$FX" -type f ! -name '*.json' ! -name '*.tsv' ! -name '*.txt' | sort)
+FILES=$(find "$FX" -type f ! -name '*.json' ! -name '*.tsv' ! -name '*.txt' ! -name '*.jpg' ! -name '*.png' | sort)
 java -cp "$JAR" audiobook.core.jvm.JvmSupportKt $FILES > "$FX/kt.tsv"
 java -cp "$JAR" audiobook.core.jvm.HashMain     $FILES > "$FX/kt_hash.tsv"
 

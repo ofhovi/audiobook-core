@@ -16,7 +16,7 @@ needs the contract to change, update `CONTRACT.md` in the same commit and bump
 
 ## The one invariant
 
-`reference/mp4_audiobook.py` and `kotlin/src/Mp4Chapters.kt` are two
+`reference/mp4_audiobook.py` and `kotlin/common/Mp4Chapters.kt` are two
 implementations of the same spec and **must produce identical output**.
 
 ```
@@ -38,11 +38,13 @@ easy to test, and it can be diffed against ffprobe as an independent oracle.
 Kotlin is what ships. Divergence between ports is the failure mode that breaks
 sync silently, so it's checked mechanically rather than by review.
 
-**`Mp4Chapters.kt` is commonMain-safe.** No `java.*`, no okio, no `Charsets`.
-All file access goes through the `ByteSource` interface. The UTF-16 and cp1252
-decoders are hand-rolled for that reason. Keep it that way: if you add a
-`java.*` import, it stops compiling for iOS and Native targets. Platform code
-belongs in `JvmSupport.kt` or its siblings.
+**`kotlin/common/` is commonMain-safe.** `Mp4Chapters.kt` and `Sync.kt` have no
+`java.*`, no okio, no `Charsets`. All file access goes through the
+`ByteSource` interface. The UTF-16 and cp1252 decoders are hand-rolled for
+that reason. Keep it that way: if you add a `java.*` import there, it stops
+compiling for iOS and Native targets. Platform code belongs in `kotlin/jvm/`
+(what ships, e.g. `audiobook-windows` depends on it) or `kotlin/jvmtest/`
+(verify.sh's own harness, not shipped anywhere).
 
 **Content ID is not a file hash.** It's `sha256(le_u64(size) || first 64KiB ||
 last 64KiB)`. Full-file hashing takes seconds per book on a phone and users
@@ -76,8 +78,8 @@ breaking the `tref/chap` reference.
 Fixtures are generated, never committed. `crosscheck.py --fixtures DIR` builds
 them: both chapter schemes, faststart layout, a 25-chapter file with CJK and
 quote characters, a 40ms chapter, an hour-long file, four truncation points,
-random garbage, an empty file, a zero-size nested atom, and content-ID window
-edges at 3 bytes, exactly 131072, and 131073.
+random garbage, an empty file, a zero-size nested atom, content-ID window
+edges at 3 bytes, exactly 131072, and 131073, and a JPEG and a PNG cover.
 
 When adding a parser feature, add a fixture for it. When fixing a parser bug,
 add the file shape that caused it.
@@ -87,10 +89,12 @@ substitute for the cross-check, since it can't validate content IDs.
 
 ## Not built yet
 
-- Sync merge logic (spec is in `CONTRACT.md` section 3, code doesn't exist)
-- Drive storage backend
-- Any player adapter or UI
 - Multi-file book support (spec'd in section 1, parser is single-file only)
+
+Sync merge logic and a Drive backend exist (`kotlin/common/Sync.kt`,
+`audiobook-windows`'s `DriveSyncBackend.kt`). A Windows UI adapter exists in
+the sibling `audiobook-windows` repo (Compose Desktop): library persistence,
+playback, sync with sign-in/out. An iOS adapter is in `audiobook-ios`.
 
 ## Conventions
 

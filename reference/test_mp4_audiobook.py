@@ -8,7 +8,7 @@ import tempfile
 
 import pytest
 
-from mp4_audiobook import Mp4Error, content_id, parse_audiobook
+from mp4_audiobook import Mp4Error, content_id, extract_cover, parse_audiobook
 
 FF = shutil.which("ffmpeg")
 pytestmark = pytest.mark.skipif(FF is None, reason="ffmpeg required")
@@ -65,6 +65,20 @@ def tagged(tmproot, plain):
     return p
 
 
+@pytest.fixture(scope="module")
+def cover_jpeg(tmproot, plain):
+    meta = os.path.join(tmproot, "chaps2.txt")
+    with open(meta, "w", encoding="utf-8") as f:
+        f.write(CHAPS)
+    cover = os.path.join(tmproot, "cover.jpg")
+    _run("-f", "lavfi", "-i", "color=c=blue:s=64x64", "-frames:v", "1", cover)
+    p = os.path.join(tmproot, "with_cover.m4b")
+    _run("-i", plain, "-i", meta, "-i", cover, "-map_metadata", "1",
+         "-map", "0:a", "-map", "2:v", "-c", "copy",
+         "-disposition:v:0", "attached_pic", p)
+    return p, cover
+
+
 # ----------------------------------------------------------------- content id
 
 def test_content_id_is_stable_and_path_independent(tagged, tmproot):
@@ -111,6 +125,20 @@ def test_metadata_tags(tagged):
     assert book.author == "Test Author"
     assert book.album == "Test Series"
     assert 29_000 <= book.duration_ms <= 31_000
+
+
+def test_no_cover_by_default(tagged):
+    book = parse_audiobook(tagged)
+    assert book.cover_format is None
+    assert extract_cover(tagged) is None
+
+
+def test_embedded_jpeg_cover(cover_jpeg):
+    p, _source_image = cover_jpeg
+    book = parse_audiobook(p)
+    assert book.cover_format == "jpeg"
+    data = extract_cover(p)
+    assert data is not None and data[:3] == b"\xff\xd8\xff"
 
 
 def test_nero_fallback_when_quicktime_track_absent(tmproot, tagged):

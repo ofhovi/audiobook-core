@@ -71,6 +71,16 @@ Guarantees the parser must uphold, because the UI relies on them:
 Titles are UTF-8. QuickTime text samples may be UTF-16 with a BOM, or legacy
 cp1252. Decode in that order and never fail: replace undecodable bytes.
 
+**Cover art.** The parse result carries `cover_format` (`"jpeg"`, `"png"`, or
+absent), read from `moov/udta/meta/ilst/covr`. It does not carry the image
+bytes: those come from a separate `extract_cover`/`extractCover` call, taken
+on demand rather than on every parse, since a client listing a library
+shouldn't have to read every embedded image just to show titles. Format is
+read from the `data` atom's iTunes type indicator (13 = JPEG, 14 = PNG),
+falling back to sniffing the magic bytes if a writer left it at 0. An
+unrecognized format is treated as no cover, not an error, per the
+never-throws-on-a-valid-MP4 rule above.
+
 ## 3. Progress record
 
 ```json

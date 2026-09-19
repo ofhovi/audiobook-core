@@ -64,6 +64,7 @@ class Book:
     narrator: Optional[str] = None
     album: Optional[str] = None
     tags: dict[str, str] = field(default_factory=dict)
+    cover_format: Optional[str] = None  # "jpeg" | "png" | None
 
 
 class Mp4Error(Exception):
@@ -360,6 +361,71 @@ def _ilst_tags(f: BinaryIO, moov: Atom) -> dict[str, str]:
     return tags
 
 
+def _cover_data_atom(f: BinaryIO, moov: Atom) -> Optional[Atom]:
+    ilst = moov.find(b"udta", b"meta", b"ilst")
+    if not ilst:
+        return None
+    covr = next((c for c in ilst.children if c.type == b"covr"), None)
+    if covr is None:
+        return None
+    data = covr.find(b"data")
+    if data is None:
+        kids = _parse_atoms(f, covr.body, covr.offset + covr.size)
+        data = next((k for k in kids if k.type == b"data"), None)
+    if data is None or data.body_size <= 8:
+        return None
+    return data
+
+
+def _sniff_cover_format(type_indicator: int, payload_head: bytes) -> Optional[str]:
+    # 13/14 are the well-known iTunes type indicators for JPEG/PNG. Some
+    # writers leave the indicator at 0 ("implicit"), so fall back to magic
+    # bytes rather than reject the cover outright.
+    if type_indicator == 13:
+        return "jpeg"
+    if type_indicator == 14:
+        return "png"
+    if payload_head[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if payload_head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    return None
+
+
+def _cover_format(f: BinaryIO, moov: Atom) -> Optional[str]:
+    """Cheap: only reads enough of the data atom to identify the format."""
+    data = _cover_data_atom(f, moov)
+    if data is None:
+        return None
+    f.seek(data.body)
+    header = f.read(16)  # type indicator(4) + locale(4) + a peek at the payload
+    if len(header) < 8:
+        return None
+    (type_indicator,) = struct.unpack_from(">I", header, 0)
+    return _sniff_cover_format(type_indicator, header[8:])
+
+
+def extract_cover(path: str) -> Optional[bytes]:
+    """The actual cover image bytes, fetched on demand. Not part of Book /
+    parse_audiobook's result: that keeps the parse result small and JSON-friendly
+    (the cross-check harness diffs it directly) and avoids reading a whole
+    embedded image just to list a library."""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        if size < 8:
+            return None
+        top = _parse_atoms(f, 0, size)
+        moov = next((a for a in top if a.type == b"moov"), None)
+        if moov is None:
+            return None
+        data = _cover_data_atom(f, moov)
+        if data is None:
+            return None
+        f.seek(data.body + 8)
+        return f.read(data.body_size - 8)
+
+
 # -------------------------------------------------------------------- public
 
 def parse_audiobook(path: str) -> Book:
@@ -398,6 +464,7 @@ def parse_audiobook(path: str) -> Book:
 
         chapters = _normalize(chapters, duration_ms)
         tags = _ilst_tags(f, moov)
+        cover_format = _cover_format(f, moov)
 
     return Book(
         duration_ms=duration_ms,
@@ -408,6 +475,7 @@ def parse_audiobook(path: str) -> Book:
         narrator=tags.get("narrator"),
         album=tags.get("album"),
         tags=tags,
+        cover_format=cover_format,
     )
 
 

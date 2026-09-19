@@ -38,6 +38,7 @@ data class Book(
     val narrator: String? = null,
     val album: String? = null,
     val tags: Map<String, String> = emptyMap(),
+    val coverFormat: String? = null, // "jpeg" | "png" | null
 )
 
 // ---------------------------------------------------------------- big endian
@@ -398,6 +399,59 @@ private fun ilstTags(src: ByteSource, moov: Atom): Map<String, String> {
     return tags
 }
 
+private fun coverDataAtom(src: ByteSource, moov: Atom): Atom? {
+    val ilst = moov.find("udta", "meta", "ilst") ?: return null
+    val covr = ilst.children.firstOrNull { it.type == "covr" } ?: return null
+    var data = covr.find("data")
+    if (data == null) {
+        val kids = parseAtoms(src, covr.body, covr.offset + covr.size)
+        data = kids.firstOrNull { it.type == "data" }
+    }
+    if (data == null || data.bodySize <= 8) return null
+    return data
+}
+
+private fun sniffCoverFormat(typeIndicator: Long, payloadHead: ByteArray): String? {
+    // 13/14 are the well-known iTunes type indicators for JPEG/PNG. Some
+    // writers leave the indicator at 0 ("implicit"), so fall back to magic
+    // bytes rather than reject the cover outright.
+    if (typeIndicator == 13L) return "jpeg"
+    if (typeIndicator == 14L) return "png"
+    if (payloadHead.size >= 3 && payloadHead.u8(0) == 0xFF && payloadHead.u8(1) == 0xD8 && payloadHead.u8(2) == 0xFF) {
+        return "jpeg"
+    }
+    if (payloadHead.size >= 8 &&
+        payloadHead.u8(0) == 0x89 && payloadHead.u8(1) == 0x50 && payloadHead.u8(2) == 0x4E && payloadHead.u8(3) == 0x47 &&
+        payloadHead.u8(4) == 0x0D && payloadHead.u8(5) == 0x0A && payloadHead.u8(6) == 0x1A && payloadHead.u8(7) == 0x0A
+    ) {
+        return "png"
+    }
+    return null
+}
+
+/** Cheap: only reads enough of the data atom to identify the format. */
+private fun coverFormat(src: ByteSource, moov: Atom): String? {
+    val data = coverDataAtom(src, moov) ?: return null
+    val header = src.readAt(data.body, 16) // type indicator(4) + locale(4) + a peek at the payload
+    if (header.size < 8) return null
+    return sniffCoverFormat(header.u32(0), header.copyOfRange(8, header.size))
+}
+
+/**
+ * The actual cover image bytes, fetched on demand. Not part of [Book] /
+ * [parseAudiobook]'s result: that keeps the parse result small and
+ * JSON-friendly (the cross-check harness diffs it directly) and avoids
+ * reading a whole embedded image just to list a library.
+ */
+fun extractCover(src: ByteSource): ByteArray? {
+    val size = src.size
+    if (size < 8) return null
+    val top = parseAtoms(src, 0, size)
+    val moov = top.firstOrNull { it.type == "moov" } ?: return null
+    val data = coverDataAtom(src, moov) ?: return null
+    return src.readAt(data.body + 8, data.bodySize - 8)
+}
+
 // -------------------------------------------------------------- normalization
 
 private fun normalize(chapters: List<Chapter>, durationMs: Long): List<Chapter> {
@@ -469,5 +523,6 @@ fun parseAudiobook(src: ByteSource): Book {
         narrator = tags["narrator"],
         album = tags["album"],
         tags = tags,
+        coverFormat = coverFormat(src, moov),
     )
 }

@@ -12,6 +12,7 @@ scripts/verify.sh). Exits non-zero on any divergence.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import random
@@ -21,7 +22,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from mp4_audiobook import Mp4Error, content_id, parse_audiobook  # noqa: E402
+from mp4_audiobook import Mp4Error, content_id, extract_cover, parse_audiobook  # noqa: E402
 
 CHAPS = """;FFMETADATA1
 title=Test Book
@@ -63,6 +64,15 @@ def build_fixtures(fx: str) -> None:
        "-c", "copy", "-movflags", "+faststart", f"{fx}/faststart.m4b")
     ff("-f", "lavfi", "-i", "sine=frequency=100:duration=3600",
        "-c:a", "aac", "-b:a", "16k", f"{fx}/long.m4a")
+
+    # Cover art: audio + chapters + an embedded image (covr atom), one JPEG
+    # and one PNG so both ports' format-sniffing paths get exercised.
+    ff("-f", "lavfi", "-i", "color=c=blue:s=64x64", "-frames:v", "1", f"{fx}/cover.jpg")
+    ff("-f", "lavfi", "-i", "color=c=red:s=64x64", "-frames:v", "1", f"{fx}/cover.png")
+    for fmt in ("jpg", "png"):
+        ff("-i", f"{fx}/plain.m4a", "-i", f"{fx}/m.txt", "-i", f"{fx}/cover.{fmt}",
+           "-map_metadata", "1", "-map", "0:a", "-map", "2:v",
+           "-c", "copy", "-disposition:v:0", "attached_pic", f"{fx}/with_cover_{fmt}.m4b")
 
     # Nero-only: break the tref/chap reference so the QuickTime path can't fire.
     d = bytearray(open(f"{fx}/book.m4b", "rb").read())
@@ -114,7 +124,8 @@ def build_fixtures(fx: str) -> None:
 
 
 def fixture_files(fx: str) -> list[str]:
-    skip = (".json", ".tsv", ".txt")
+    # .jpg/.png here are cover-art source images muxed into fixtures, not fixtures themselves.
+    skip = (".json", ".tsv", ".txt", ".jpg", ".png")
     return sorted(f for f in os.listdir(fx) if not f.endswith(skip))
 
 
@@ -126,10 +137,13 @@ def run_python(fx: str) -> None:
         hashes[name] = content_id(path)
         try:
             b = parse_audiobook(path)
+            cover = extract_cover(path)
             out[name] = {
                 "duration_ms": b.duration_ms,
                 "chapter_source": b.chapter_source,
                 "title": b.title, "author": b.author, "album": b.album,
+                "cover_format": b.cover_format,
+                "cover_sha256": hashlib.sha256(cover).hexdigest() if cover else None,
                 "chapters": [
                     {"index": c.index, "title": c.title,
                      "start_ms": c.start_ms, "end_ms": c.end_ms}
@@ -176,7 +190,8 @@ def compare(fx: str) -> int:
         if "error" in a:
             continue
         diffs = []
-        for k in ("duration_ms", "chapter_source", "title", "author", "album"):
+        for k in ("duration_ms", "chapter_source", "title", "author", "album",
+                   "cover_format", "cover_sha256"):
             if a[k] != b[k]:
                 diffs.append(f"{k}: {a[k]!r} vs {b[k]!r}")
         if len(a["chapters"]) != len(b["chapters"]):

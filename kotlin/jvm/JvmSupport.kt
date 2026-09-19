@@ -3,6 +3,7 @@ package audiobook.core.jvm
 import audiobook.core.Book
 import audiobook.core.ByteSource
 import audiobook.core.Mp4Error
+import audiobook.core.extractCover
 import audiobook.core.parseAudiobook
 import java.io.File
 import java.io.RandomAccessFile
@@ -63,13 +64,17 @@ private fun esc(s: String): String {
     return sb.toString()
 }
 
-private fun toJson(b: Book): String {
+private fun sha256Hex(b: ByteArray): String =
+    MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+
+private fun toJson(b: Book, coverSha256: String?): String {
     val ch = b.chapters.joinToString(",") {
         """{"index":${it.index},"title":"${esc(it.title)}","start_ms":${it.startMs},"end_ms":${it.endMs}}"""
     }
     fun opt(v: String?) = if (v == null) "null" else "\"${esc(v)}\""
     return """{"duration_ms":${b.durationMs},"chapter_source":"${b.chapterSource.name.lowercase()}",""" +
         """"title":${opt(b.title)},"author":${opt(b.author)},"album":${opt(b.album)},""" +
+        """"cover_format":${opt(b.coverFormat)},"cover_sha256":${opt(coverSha256)},""" +
         """"chapters":[$ch]}"""
 }
 
@@ -78,7 +83,9 @@ fun main(args: Array<String>) {
         val f = File(path)
         print("${f.name}\t")
         try {
-            FileByteSource(f).use { println(toJson(parseAudiobook(it))) }
+            val book = FileByteSource(f).use { parseAudiobook(it) }
+            val coverSha256 = FileByteSource(f).use { extractCover(it) }?.let { sha256Hex(it) }
+            println(toJson(book, coverSha256))
         } catch (e: Mp4Error) {
             println("""{"error":"${esc(e.message ?: "")}"}""")
         }
