@@ -484,6 +484,12 @@ private fun normalize(chapters: List<Chapter>, durationMs: Long): List<Chapter> 
 
 // -------------------------------------------------------------------- public
 
+/**
+ * @Throws is a no-op on JVM but required for Kotlin/Native: without it, a
+ * thrown Mp4Error crashes Swift/Obj-C callers instead of being catchable via
+ * `try`. iOS's SwiftUI layer relies on this.
+ */
+@Throws(Mp4Error::class)
 fun parseAudiobook(src: ByteSource): Book {
     val size = src.size
     if (size < 8) throw Mp4Error("file too small to be MP4")
