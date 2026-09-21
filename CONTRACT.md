@@ -122,6 +122,21 @@ If `updated_at` values are equal, prefer the higher `position_ms`.
 
 One JSON object in Google Drive's `appDataFolder`, filename `sync-v1.json`.
 
+OAuth scope is `drive` (full account access), not `drive.appdata` alone.
+`appDataFolder`, like `drive.file`, is scoped per OAuth client: a folder or
+file one client creates is invisible to a *different* client, even under the
+same Google account. Windows and iOS necessarily register as different
+clients (different redirect mechanisms), so two clients each holding only
+`drive.appdata`/`drive.file` can never see each other's data, only their own.
+This was discovered by shipping it and watching it silently fail cross-device
+(each client "successfully" synced against its own private, empty view),
+not by reading Google's docs closely enough beforehand. `drive` grants access
+to the user's whole Drive rather than to a specific client's slice of it, so
+every client sees the same folder regardless of who created it. `drive` is a
+restricted scope: expect a stronger consent warning and, while the app stays
+in Testing status, refresh tokens that expire after 7 days regardless of
+activity (Google's Testing-mode policy, not something this app controls).
+
 ```json
 {
   "schema": 1,
@@ -212,9 +227,13 @@ that document only ever carries progress for books a device already has.
 
 Library sync lives in its own Drive folder, **not** `appDataFolder`: files
 here are large and the user should be able to see and manage them like any
-other Drive content, which a hidden app-data folder doesn't allow. This needs
-the `drive.file` scope in addition to `drive.appdata`; a client already
-authorized under v1 (progress-only) must re-consent to get it.
+other Drive content, which a hidden app-data folder doesn't allow. Uses the
+same `drive` scope as section 4, for the same reason: `drive.file` looked
+right on paper (per-file access to what the app itself created) but is scoped
+per OAuth client the same way `appDataFolder` is, so it can't do the one
+thing this section exists for, letting a *different* client see a file this
+one created. See section 4's note. A client authorized under the old
+`drive.appdata`/`drive.file` pair must re-consent to get the wider scope.
 
 - Folder name: `Audiobook Core`, created at the root of the user's Drive if
   it doesn't already exist (find-by-name first; do not create duplicates).
@@ -274,3 +293,8 @@ authorized under v1 (progress-only) must re-consent to get it.
 - Added section 7 (library sync: book metadata and audio files, a separate
   Drive folder and scope from the progress-only sync document). Additive,
   no `schema` bump: section 4's sync document is unchanged.
+- Changed both sections' OAuth scope from `drive.appdata`/`drive.file` to
+  `drive`: those are scoped per OAuth client, so Windows and iOS (necessarily
+  different clients) could each sync successfully against their own private,
+  invisible-to-each-other data and never see one another's. No `schema`
+  bump, this is a transport/auth detail, not a document shape change.
